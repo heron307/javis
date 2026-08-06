@@ -1,0 +1,91 @@
+import type { Mission } from '../types/mission'
+
+export const MISSION_SEED: Mission[] = [
+  {
+    id: 'mission-seed-bkk',
+    title: '방콕 주말 미션',
+    countryCode: 'TH',
+    cities: ['방콕'],
+    startDate: '2026-09-12',
+    endDate: '2026-09-15',
+    currency: 'KRW',
+    budgetTotal: 800000,
+    status: 'draft',
+    notes: '수쿰빗 베이스 · 왕궁·야시장 위주',
+    days: [
+      {
+        id: 'md-bkk-1',
+        day: 1,
+        date: '2026-09-12',
+        city: '방콕',
+        title: '도착 · 수쿰빗',
+        notes: '저녁은 소이 음식골목',
+        stops: [
+          { id: 'ms-1', title: '호텔 체크인', notes: '', estCost: 0 },
+          { id: 'ms-2', title: '터미널 21', notes: '가벼운 쇼핑', estCost: 30000 },
+        ],
+      },
+      {
+        id: 'md-bkk-2',
+        day: 2,
+        date: '2026-09-13',
+        city: '방콕',
+        title: '왕궁 · 왓아룬',
+        notes: '오전 일찍 왕궁',
+        stops: [
+          { id: 'ms-3', title: '그랜드 팰리스', notes: '', estCost: 15000 },
+          { id: 'ms-4', title: '왓 아룬', notes: '일몰', estCost: 8000 },
+        ],
+      },
+      {
+        id: 'md-bkk-3',
+        day: 3,
+        date: '2026-09-14',
+        city: '방콕',
+        title: '짜뚜짝 · 야시장',
+        notes: '',
+        stops: [
+          { id: 'ms-5', title: '짜뚜짝 주말시장', notes: '', estCost: 40000 },
+          { id: 'ms-6', title: '아속 야시장', notes: '', estCost: 25000 },
+        ],
+      },
+      {
+        id: 'md-bkk-4',
+        day: 4,
+        date: '2026-09-15',
+        city: '방콕',
+        title: '귀국',
+        notes: '오전 체크아웃',
+        stops: [{ id: 'ms-7', title: '공항 이동', notes: 'BTS+공항철도', estCost: 10000 }],
+      },
+    ],
+    expenses: [
+      {
+        id: 'me-1',
+        category: 'flight',
+        label: '왕복 항공',
+        amount: 350000,
+        day: null,
+        paid: false,
+      },
+      {
+        id: 'me-2',
+        category: 'lodging',
+        label: '호텔 3박',
+        amount: 240000,
+        day: null,
+        paid: false,
+      },
+      {
+        id: 'me-3',
+        category: 'food',
+        label: '식비 예산',
+        amount: 120000,
+        day: null,
+        paid: false,
+      },
+    ],
+    createdAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
+  },
+]
