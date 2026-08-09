@@ -4,6 +4,7 @@ import {
   buildBackup,
   type JavisBackupFile,
 } from './dataBackup'
+import { hydrateAllStores } from './hydrateStores'
 import { getSupabase, isCloudConfigured } from './supabase'
 
 export type CloudSyncStatus =
@@ -20,6 +21,8 @@ type UserDataRow = {
 
 /** 로컬 데이터가 마지막으로 바뀐 시각 (삭제 포함). LWW 비교용 */
 const LOCAL_REVISED_KEY = 'javis.sync.localRevisedAt'
+/** 이미 적용한 클라우드 스냅샷 — 같은 버전 재pull/리로드 루프 방지 */
+const LAST_APPLIED_CLOUD_KEY = 'javis.sync.lastAppliedCloudAt'
 
 /** pull 적용 중에는 자동 push 하지 않음 */
 let suppressCloudPush = false
@@ -61,10 +64,27 @@ function setLocalRevisedAt(iso: string): void {
   localStorage.setItem(LOCAL_REVISED_KEY, iso)
 }
 
+function getLastAppliedCloudAt(): string | null {
+  return localStorage.getItem(LAST_APPLIED_CLOUD_KEY)
+}
+
+function setLastAppliedCloudAt(iso: string): void {
+  localStorage.setItem(LAST_APPLIED_CLOUD_KEY, iso)
+}
+
 function parseTime(iso: string | null | undefined): number {
   if (!iso) return 0
   const t = Date.parse(iso)
   return Number.isNaN(t) ? 0 : t
+}
+
+function applyCloudPayload(payload: JavisBackupFile, updatedAt: string): void {
+  withPushSuppressed(() => {
+    applyBackup(payload)
+  })
+  setLocalRevisedAt(updatedAt)
+  setLastAppliedCloudAt(updatedAt)
+  hydrateAllStores()
 }
 
 /** 현재 로컬 데이터를 클라우드에 저장 (로그인 사용자 전용) */
@@ -95,8 +115,8 @@ export async function pushCloudBackup(): Promise<{ updatedAt: string }> {
     .single()
 
   if (error) throw error
-  // 푸시 성공 후 로컬 리비전을 클라우드 시각에 맞춤 (삭제 반영본이 기준)
   setLocalRevisedAt(data.updated_at)
+  setLastAppliedCloudAt(data.updated_at)
   return { updatedAt: data.updated_at }
 }
 
@@ -135,7 +155,7 @@ export function queueCloudPush(delayMs = 1200): void {
 
 /**
  * 클라우드로 로컬을 덮어씀 (삭제 포함).
- * 적용 후 페이지 새로고침 권장.
+ * 적용 후 hydrate로 UI 갱신 (전체 새로고침 불필요).
  */
 export async function pullCloudBackup(): Promise<{
   applied: boolean
@@ -172,11 +192,11 @@ export async function pullCloudBackup(): Promise<{
   const changed = !backupDataEqual(local.data, payload.data)
 
   if (changed) {
-    withPushSuppressed(() => {
-      applyBackup(payload)
-    })
+    applyCloudPayload(payload, data.updated_at)
+  } else {
+    setLocalRevisedAt(data.updated_at)
+    setLastAppliedCloudAt(data.updated_at)
   }
-  setLocalRevisedAt(data.updated_at)
 
   return { applied: true, changed, updatedAt: data.updated_at }
 }
@@ -203,6 +223,7 @@ export async function fetchCloudMeta(): Promise<{ updatedAt: string | null }> {
 /**
  * 로그인/포커스 동기화 — 마지막 저장 시각 기준(LWW).
  * 로컬이 더 최신이면 push(삭제 포함), 클라우드가 같거나 더 최신이면 pull.
+ * pull 시 전체 페이지 리로드 없이 hydrate.
  */
 export async function syncOnLogin(): Promise<
   'pulled' | 'unchanged' | 'pushed' | 'noop'
@@ -252,20 +273,22 @@ export async function syncOnLogin(): Promise<
 
     if (same) {
       setLocalRevisedAt(data.updated_at)
+      setLastAppliedCloudAt(data.updated_at)
       return 'unchanged'
     }
 
-    // 로컬 수정(삭제 포함)이 클라우드보다 늦으면 로컬이 이김
+    // 같은 클라우드 스냅샷을 이미 적용했으면 재적용/리로드 루프 금지
+    if (getLastAppliedCloudAt() === data.updated_at) {
+      setLocalRevisedAt(data.updated_at)
+      return 'unchanged'
+    }
+
     if (localTime > cloudTime) {
       await pushCloudBackup()
       return 'pushed'
     }
 
-    // 클라우드가 같거나 더 최신 → 덮어쓰기 (원격 삭제 반영)
-    withPushSuppressed(() => {
-      applyBackup(remote)
-    })
-    setLocalRevisedAt(data.updated_at)
+    applyCloudPayload(remote, data.updated_at)
     return 'pulled'
   })()
 

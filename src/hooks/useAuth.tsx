@@ -72,14 +72,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSyncing(true)
     setSyncError(null)
     try {
-      const result = await syncOnLogin()
+      await syncOnLogin()
       setLastSyncAt(new Date().toISOString())
       initialSyncDoneRef.current = true
-      if (result === 'pulled') {
-        window.setTimeout(() => {
-          window.location.assign(`${window.location.origin}/`)
-        }, 500)
-      }
+      // pull 후에도 전체 새로고침하지 않음 (리로드 루프 방지 · hydrate로 UI 갱신)
     } catch (err) {
       console.error(err)
       setSyncError(err instanceof Error ? err.message : '동기화 실패')
@@ -194,7 +190,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         window.setTimeout(() => {
           if (cancelled) return
           if (!initialSyncDoneRef.current) {
-            initialSyncDoneRef.current = false
             void runLoginSync()
           }
         }, 0)
@@ -205,28 +200,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     })
 
-    let focusTimer: ReturnType<typeof setTimeout> | null = null
-    const onVisible = () => {
-      if (document.visibilityState !== 'visible') return
-      if (!initialSyncDoneRef.current) return
-      if (focusTimer) clearTimeout(focusTimer)
-      focusTimer = setTimeout(() => {
-        focusTimer = null
-        void supabase.auth.getSession().then(({ data }) => {
-          if (data.session?.user) void runLoginSync()
-        })
-      }, 400)
-    }
-
-    document.addEventListener('visibilitychange', onVisible)
-    window.addEventListener('focus', onVisible)
+    // 포커스마다 자동 sync하면 pull 루프/깜빡임이 나므로 제거.
+    // 수동 「지금 동기화」또는 로그인 시만 sync.
 
     return () => {
       cancelled = true
       subscription.unsubscribe()
-      document.removeEventListener('visibilitychange', onVisible)
-      window.removeEventListener('focus', onVisible)
-      if (focusTimer) clearTimeout(focusTimer)
     }
   }, [configured, runLoginSync])
 

@@ -100,10 +100,7 @@ export function CloudAccountPanel() {
         )
         return
       }
-      setMessage(`불러오기 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
-      window.setTimeout(() => {
-        window.location.assign(`${window.location.origin}/`)
-      }, 400)
+      setMessage(`불러오기 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : '다운로드 실패')
     } finally {

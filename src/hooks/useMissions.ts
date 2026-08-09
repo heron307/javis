@@ -30,6 +30,12 @@ function setCache(next: Mission[]) {
   emit()
 }
 
+/** 클라우드 pull 후 localStorage → 캐시만 갱신 */
+export function hydrateMissionsFromStorage(): void {
+  cache = loadMissions()
+  emit()
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => listeners.delete(listener)

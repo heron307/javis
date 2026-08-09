@@ -22,6 +22,12 @@ function setCache(next: GeoPlace[]) {
   emit()
 }
 
+/** 클라우드 pull 후 localStorage → 캐시만 갱신 (save/push 없음) */
+export function hydratePlacesFromStorage(): void {
+  cache = loadPlaces()
+  emit()
+}
+
 function subscribe(listener: () => void) {
   listeners.add(listener)
   return () => listeners.delete(listener)
