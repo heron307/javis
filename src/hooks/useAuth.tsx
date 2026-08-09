@@ -26,7 +26,7 @@ type AuthContextValue = {
   syncing: boolean
   lastSyncAt: string | null
   syncError: string | null
-  /** 수동/포커스 동기화 (로컬↔클라우드 병합) */
+  /** 수동/포커스 동기화 (LWW · 삭제 반영) */
   resync: () => Promise<void>
 }
 
@@ -42,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const initialSyncDoneRef = useRef(false)
   const syncingRef = useRef(false)
 
-  const runLoginSync = useCallback(async (opts?: { forceReload?: boolean }) => {
+  const runLoginSync = useCallback(async () => {
     if (syncingRef.current) return
     syncingRef.current = true
     setSyncing(true)
@@ -51,16 +51,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await syncOnLogin()
       setLastSyncAt(new Date().toISOString())
       initialSyncDoneRef.current = true
-      // 클라우드·로컬 병합으로 로컬이 바뀌면 캐시 갱신 위해 홈으로 이동
-      if (result === 'pulled' || opts?.forceReload) {
+      if (result === 'pulled') {
+        // OAuth 콜백 해시/세션 정착 후 새로고침
         window.setTimeout(() => {
           window.location.assign(`${window.location.origin}/`)
-        }, 350)
+        }, 500)
       }
     } catch (err) {
       console.error(err)
       setSyncError(err instanceof Error ? err.message : '동기화 실패')
-      // 실패 시 다음 포커스/재시도 가능
       initialSyncDoneRef.current = false
     } finally {
       syncingRef.current = false
@@ -97,10 +96,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, next) => {
+      if (cancelled) return
       setSession(next)
+      setLoading(false)
       if (event === 'SIGNED_IN' && next?.user) {
         initialSyncDoneRef.current = false
+        // URL의 OAuth 토큰이 localStorage에 저장된 뒤 동기화
         await runLoginSync()
+        if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
+          window.history.replaceState({}, document.title, window.location.origin + '/')
+        }
       }
       if (event === 'SIGNED_OUT') {
         initialSyncDoneRef.current = false
@@ -222,4 +227,18 @@ export function displayAuthName(user: User | null | undefined): string | null {
     user.email?.split('@')[0] ||
     user.id
   )
+}
+
+/** google / github 등 */
+export function displayAuthProvider(
+  user: User | null | undefined,
+): string | null {
+  if (!user) return null
+  const fromMeta = user.app_metadata?.provider as string | undefined
+  const fromIdentity = user.identities?.[0]?.provider
+  const raw = (fromMeta || fromIdentity || '').toLowerCase()
+  if (raw === 'google') return 'Google'
+  if (raw === 'github') return 'GitHub'
+  if (!raw) return null
+  return raw.charAt(0).toUpperCase() + raw.slice(1)
 }

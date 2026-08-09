@@ -1,7 +1,11 @@
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { useAuth, displayAuthName } from '../hooks/useAuth'
+import {
+  useAuth,
+  displayAuthName,
+  displayAuthProvider,
+} from '../hooks/useAuth'
 import { BackupRestoreModal } from './BackupRestoreModal'
 
 type Props = {
@@ -20,8 +24,9 @@ const NAV_ITEMS = [
 
 export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
   const [backupOpen, setBackupOpen] = useState(false)
-  const { configured, user } = useAuth()
+  const { configured, loading, user, syncing } = useAuth()
   const accountName = displayAuthName(user)
+  const provider = displayAuthProvider(user)
 
   return (
     <div className="app-shell">
@@ -55,10 +60,32 @@ export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
           </ul>
 
           <div className="nav-status">
-            {configured && accountName && (
-              <span className="nav-gh-user font-mono" title="로그인됨">
-                {accountName}
-              </span>
+            {configured && (
+              <button
+                type="button"
+                className={`nav-auth-btn${user ? ' is-in' : ' is-out'}`}
+                onClick={() => setBackupOpen(true)}
+                title={
+                  user
+                    ? `${provider ?? 'OAuth'} · ${accountName ?? user.email ?? ''}`
+                    : 'ARCHIVE에서 로그인'
+                }
+              >
+                {loading ? (
+                  <span className="nav-auth-line">계정 확인 중…</span>
+                ) : user ? (
+                  <>
+                    <span className="nav-auth-state">LOGIN</span>
+                    <span className="nav-auth-provider">{provider ?? 'OAuth'}</span>
+                    <span className="nav-auth-name font-mono">
+                      {accountName ?? user.email ?? user.id.slice(0, 8)}
+                    </span>
+                    {syncing ? <span className="nav-auth-sync">sync…</span> : null}
+                  </>
+                ) : (
+                  <span className="nav-auth-line">로그인 안 됨</span>
+                )}
+              </button>
             )}
             <button
               type="button"

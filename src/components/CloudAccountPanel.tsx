@@ -1,6 +1,10 @@
 import { useState } from 'react'
 import { pullCloudBackup, pushCloudBackup } from '../lib/cloudSync'
-import { displayAuthName, useAuth } from '../hooks/useAuth'
+import {
+  displayAuthName,
+  displayAuthProvider,
+  useAuth,
+} from '../hooks/useAuth'
 
 export function CloudAccountPanel() {
   const {
@@ -76,7 +80,7 @@ export function CloudAccountPanel() {
 
   async function handlePull() {
     const ok = window.confirm(
-      '클라우드와 이 브라우저 데이터를 합칩니다(장소 등 id 기준). 계속할까요?',
+      '클라우드 데이터로 이 브라우저를 덮어씁니다(삭제 포함). 계속할까요?',
     )
     if (!ok) return
     setBusy(true)
@@ -94,7 +98,7 @@ export function CloudAccountPanel() {
         )
         return
       }
-      setMessage(`병합 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
+      setMessage(`불러오기 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
       window.setTimeout(() => {
         window.location.assign(`${window.location.origin}/`)
       }, 400)
@@ -111,7 +115,7 @@ export function CloudAccountPanel() {
     setMessage('')
     try {
       await resync()
-      setMessage('동기화(병합) 요청 완료')
+      setMessage('동기화 요청 완료 (최신 저장본 기준 · 삭제 반영)')
     } catch (err) {
       setError(err instanceof Error ? err.message : '동기화 실패')
     } finally {
@@ -120,6 +124,7 @@ export function CloudAccountPanel() {
   }
 
   const login = displayAuthName(user)
+  const provider = displayAuthProvider(user)
 
   return (
     <div className="cloud-account">
@@ -127,8 +132,9 @@ export function CloudAccountPanel() {
       {!user ? (
         <>
           <p className="cloud-account-hint">
-            Google 또는 GitHub로 로그인하면 기기·브라우저 데이터를 합쳐(병합)
-            같은 Geo / Travel / Mission 목록을 유지합니다.
+            Google 또는 GitHub로 <strong>앱에 로그인</strong>해야 동기화 버튼이
+            나타납니다. (브라우저에 Google 계정이 있어도 J.A.V.I.S. 로그인과는
+            별개입니다.)
           </p>
           <div className="cloud-account-actions">
             <button
@@ -150,8 +156,14 @@ export function CloudAccountPanel() {
       ) : (
         <>
           <p className="cloud-account-user font-mono">
+            {provider ? `${provider} · ` : ''}
             {login}
+            {user.email ? ` · ${user.email}` : ''}
             {syncing ? ' · syncing…' : ''}
+          </p>
+          <p className="cloud-account-hint">
+            동기화는 <strong>마지막에 저장된 쪽</strong>이 기준입니다. 한쪽에서
+            삭제한 장소도 클라우드에 반영되면 다른 브라우저에서 사라집니다.
           </p>
           {lastSyncAt && (
             <p className="cloud-account-hint">
@@ -181,7 +193,7 @@ export function CloudAccountPanel() {
               onClick={handlePull}
               disabled={busy || syncing}
             >
-              클라우드와 병합
+              클라우드에서 불러오기
             </button>
             <button
               type="button"

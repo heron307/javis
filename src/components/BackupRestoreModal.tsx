@@ -157,7 +157,8 @@ export function BackupRestoreModal({ open, onClose }: Props) {
         </div>
 
         <p className="page-desc" style={{ marginBottom: '1rem' }}>
-          GitHub 로그인으로 기기 간 동기화하거나, JSON 파일로 백업·복구할 수 있습니다.
+          Google/GitHub로 앱에 로그인하면 기기 간 동기화(삭제 포함)가 가능합니다.
+          JSON 파일로도 백업·복구할 수 있습니다.
         </p>
 
         <section className="backup-section">
