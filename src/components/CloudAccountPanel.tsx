@@ -17,6 +17,8 @@ export function CloudAccountPanel() {
     syncing,
     lastSyncAt,
     syncError,
+    authError,
+    clearAuthError,
     resync,
   } = useAuth()
   const [busy, setBusy] = useState(false)
@@ -136,6 +138,24 @@ export function CloudAccountPanel() {
             나타납니다. (브라우저에 Google 계정이 있어도 J.A.V.I.S. 로그인과는
             별개입니다.)
           </p>
+          {(authError || error) && (
+            <p className="form-error" role="alert">
+              {authError || error}
+              {authError ? (
+                <>
+                  {' '}
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ marginLeft: '0.35rem' }}
+                    onClick={clearAuthError}
+                  >
+                    닫기
+                  </button>
+                </>
+              ) : null}
+            </p>
+          )}
           <div className="cloud-account-actions">
             <button
               type="button"
@@ -152,6 +172,12 @@ export function CloudAccountPanel() {
               GitHub로 로그인
             </button>
           </div>
+          <p className="cloud-account-hint">
+            로그인 후에도 ‘로그인 안 됨’이면 Supabase → Authentication → URL
+            Configuration에 Site URL·Redirect URLs로{' '}
+            <code>{typeof window !== 'undefined' ? window.location.origin : 'https://…'}</code>
+            가 등록돼 있는지 확인하세요.
+          </p>
         </>
       ) : (
         <>
@@ -206,9 +232,9 @@ export function CloudAccountPanel() {
           </div>
         </>
       )}
-      {(message || syncError || error) && (
-        <p className={error || syncError ? 'form-error' : 'place-search-scope'}>
-          {error || syncError || message}
+      {(message || syncError || error || (user && authError)) && (
+        <p className={error || syncError || authError ? 'form-error' : 'place-search-scope'}>
+          {error || syncError || (user ? authError : null) || message}
         </p>
       )}
     </div>

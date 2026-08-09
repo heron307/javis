@@ -14,6 +14,16 @@
 4. Supabase → Authentication → Providers → **Google** Enable  
    Client ID / Client Secret 입력
 
+### 필수: Redirect URL (로그인 후 ‘로그인 안 됨’일 때)
+Supabase → **Authentication → URL Configuration**
+- **Site URL**: `https://javis-nu.vercel.app` (배포 주소)
+- **Redirect URLs**에 추가:
+  - `https://javis-nu.vercel.app/**`
+  - `https://javis-nu.vercel.app/`
+  - 로컬 개발 시 `http://localhost:5173/**`
+
+여기가 비어 있거나 localhost만 있으면 Google 동의 후에도 앱 세션이 안 생깁니다.
+
 ## 3. GitHub 로그인 (선택)
 1. GitHub → Settings → Developer settings → OAuth Apps → New
 2. Authorization callback URL: Supabase GitHub Callback URL

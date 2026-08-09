@@ -10,7 +10,12 @@ import {
 } from 'react'
 import type { Provider, Session, User } from '@supabase/supabase-js'
 import { syncOnLogin } from '../lib/cloudSync'
-import { getSupabase, isCloudConfigured } from '../lib/supabase'
+import {
+  clearOAuthParamsFromUrl,
+  getSupabase,
+  isCloudConfigured,
+  readOAuthCallback,
+} from '../lib/supabase'
 
 export type OAuthProvider = Extract<Provider, 'github' | 'google'>
 
@@ -26,6 +31,8 @@ type AuthContextValue = {
   syncing: boolean
   lastSyncAt: string | null
   syncError: string | null
+  authError: string | null
+  clearAuthError: () => void
   /** 수동/포커스 동기화 (LWW · 삭제 반영) */
   resync: () => Promise<void>
 }
@@ -39,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const [authError, setAuthError] = useState<string | null>(null)
   const initialSyncDoneRef = useRef(false)
   const syncingRef = useRef(false)
 
@@ -52,7 +60,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLastSyncAt(new Date().toISOString())
       initialSyncDoneRef.current = true
       if (result === 'pulled') {
-        // OAuth 콜백 해시/세션 정착 후 새로고침
         window.setTimeout(() => {
           window.location.assign(`${window.location.origin}/`)
         }, 500)
@@ -71,6 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await runLoginSync()
   }, [runLoginSync])
 
+  const clearAuthError = useCallback(() => setAuthError(null), [])
+
   useEffect(() => {
     if (!configured) {
       setLoading(false)
@@ -84,28 +93,70 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    async function bootstrap() {
+      const { code, error: oauthError } = readOAuthCallback()
+
+      if (oauthError) {
+        if (!cancelled) {
+          setAuthError(oauthError)
+          setSession(null)
+          setLoading(false)
+        }
+        clearOAuthParamsFromUrl()
+        return
+      }
+
+      if (code) {
+        const { data, error } = await supabase!.auth.exchangeCodeForSession(code)
+        clearOAuthParamsFromUrl()
+        if (cancelled) return
+        if (error) {
+          console.error('[javis] OAuth code exchange failed', error)
+          setAuthError(
+            error.message ||
+              '로그인 코드 교환에 실패했습니다. Supabase Redirect URL에 이 사이트 주소가 있는지 확인하세요.',
+          )
+          setSession(null)
+          setLoading(false)
+          return
+        }
+        setSession(data.session)
+        setLoading(false)
+        setAuthError(null)
+        if (data.session?.user) {
+          await runLoginSync()
+        }
+        return
+      }
+
+      const { data } = await supabase!.auth.getSession()
       if (cancelled) return
       setSession(data.session)
       setLoading(false)
       if (data.session?.user && !initialSyncDoneRef.current) {
         await runLoginSync()
       }
-    })
+    }
+
+    void bootstrap()
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, next) => {
+    } = supabase.auth.onAuthStateChange((event, next) => {
       if (cancelled) return
       setSession(next)
       setLoading(false)
+
+      // onAuthStateChange 안에서 await auth API 호출하면 데드락 날 수 있어 지연
       if (event === 'SIGNED_IN' && next?.user) {
-        initialSyncDoneRef.current = false
-        // URL의 OAuth 토큰이 localStorage에 저장된 뒤 동기화
-        await runLoginSync()
-        if (window.location.hash.includes('access_token') || window.location.search.includes('code=')) {
-          window.history.replaceState({}, document.title, window.location.origin + '/')
-        }
+        setAuthError(null)
+        window.setTimeout(() => {
+          if (cancelled) return
+          if (!initialSyncDoneRef.current) {
+            initialSyncDoneRef.current = false
+            void runLoginSync()
+          }
+        }, 0)
       }
       if (event === 'SIGNED_OUT') {
         initialSyncDoneRef.current = false
@@ -141,18 +192,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
     const supabase = getSupabase()
     if (!supabase) throw new Error('클라우드가 설정되지 않았습니다.')
+    setAuthError(null)
     const redirectTo = `${window.location.origin}/`
-    const { error } = await supabase.auth.signInWithOAuth({
+    const { data, error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
         redirectTo,
-        queryParams:
-          provider === 'google'
-            ? { access_type: 'offline', prompt: 'consent' }
-            : undefined,
+        skipBrowserRedirect: false,
       },
     })
     if (error) throw error
+    if (!data.url) {
+      throw new Error('OAuth URL을 받지 못했습니다. Supabase Provider 설정을 확인하세요.')
+    }
   }, [])
 
   const signInWithGitHub = useCallback(
@@ -187,6 +239,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       syncing,
       lastSyncAt,
       syncError,
+      authError,
+      clearAuthError,
       resync,
     }),
     [
@@ -200,6 +254,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       syncing,
       lastSyncAt,
       syncError,
+      authError,
+      clearAuthError,
       resync,
     ],
   )

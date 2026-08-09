@@ -24,7 +24,7 @@ const NAV_ITEMS = [
 
 export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
   const [backupOpen, setBackupOpen] = useState(false)
-  const { configured, loading, user, syncing } = useAuth()
+  const { configured, loading, user, syncing, authError } = useAuth()
   const accountName = displayAuthName(user)
   const provider = displayAuthProvider(user)
 
@@ -83,9 +83,16 @@ export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
                     {syncing ? <span className="nav-auth-sync">sync…</span> : null}
                   </>
                 ) : (
-                  <span className="nav-auth-line">로그인 안 됨</span>
+                  <span className="nav-auth-line">
+                    {authError ? '로그인 실패' : '로그인 안 됨'}
+                  </span>
                 )}
               </button>
+            )}
+            {configured && authError && (
+              <span className="nav-auth-error" title={authError}>
+                ERR
+              </span>
             )}
             <button
               type="button"

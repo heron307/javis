@@ -1804,6 +1804,14 @@ section {
   white-space: nowrap;
 }
 
+.nav-auth-error {
+  color: #ff8f6b;
+  border: 1px solid rgba(255, 143, 107, 0.55);
+  padding: 0.2rem 0.4rem;
+  font-size: 0.65rem;
+  letter-spacing: 0.06em;
+}
+
 .visit-form {
   display: flex;
   flex-direction: column;
