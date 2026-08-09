@@ -28,6 +28,7 @@ function normalizePlace(p: GeoPlace): GeoPlace {
 
 export function savePlaces(places: GeoPlace[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(places))
+  void import('./cloudSync').then((m) => m.queueCloudPush()).catch(() => {})
 }
 
 export function createPlaceId(): string {

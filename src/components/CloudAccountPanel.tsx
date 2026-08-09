@@ -82,9 +82,15 @@ export function CloudAccountPanel() {
     setError('')
     setMessage('')
     try {
-      const { applied, updatedAt } = await pullCloudBackup()
+      const { applied, changed, updatedAt } = await pullCloudBackup()
       if (!applied) {
         setMessage('클라우드에 저장된 데이터가 없습니다. 먼저 업로드하세요.')
+        return
+      }
+      if (!changed) {
+        setMessage(
+          `이미 최신입니다 · ${updatedAt?.slice(0, 19).replace('T', ' ')}`,
+        )
         return
       }
       setMessage(`다운로드 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
@@ -106,8 +112,8 @@ export function CloudAccountPanel() {
       {!user ? (
         <>
           <p className="cloud-account-hint">
-            Google 또는 GitHub로 로그인하면 어디서든 같은 개인 데이터를 불러올 수
-            있습니다.
+            Google 또는 GitHub로 로그인하면 기기·브라우저가 달라도 같은 데이터가
+            자동으로 맞춰집니다.
           </p>
           <div className="cloud-account-actions">
             <button

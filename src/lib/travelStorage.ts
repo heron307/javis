@@ -86,6 +86,7 @@ export function loadVisits(): StoredTravelVisit[] {
 
 export function saveVisits(visits: StoredTravelVisit[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(visits))
+  void import('./cloudSync').then((m) => m.queueCloudPush()).catch(() => {})
 }
 
 export function createId(): string {

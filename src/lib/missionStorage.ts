@@ -28,6 +28,7 @@ export function loadMissions(): Mission[] {
 
 export function saveMissions(missions: Mission[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(missions))
+  void import('./cloudSync').then((m) => m.queueCloudPush()).catch(() => {})
 }
 
 export function createMissionId(): string {

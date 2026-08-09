@@ -42,6 +42,7 @@ export function loadCategories(): PlaceCategoryDef[] {
 
 export function saveCategories(categories: PlaceCategoryDef[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(categories))
+  void import('./cloudSync').then((m) => m.queueCloudPush()).catch(() => {})
 }
 
 export function slugifyCategoryId(input: string): string {

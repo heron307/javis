@@ -18,6 +18,7 @@ export function loadFlightScans(): FlightScanRecord[] {
 
 export function saveFlightScans(scans: FlightScanRecord[]): void {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(scans.slice(0, MAX_HISTORY)))
+  void import('./cloudSync').then((m) => m.queueCloudPush()).catch(() => {})
 }
 
 export function createScanId(): string {

@@ -17,6 +17,20 @@ type UserDataRow = {
   updated_at: string
 }
 
+/** pull 적용 중에는 자동 push 하지 않음 */
+let suppressCloudPush = false
+let pushTimer: ReturnType<typeof setTimeout> | null = null
+let pushInFlight: Promise<void> | null = null
+
+async function hasSessionUser(): Promise<boolean> {
+  const supabase = getSupabase()
+  if (!supabase) return false
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
+  return Boolean(session?.user)
+}
+
 /** 현재 로컬 데이터를 클라우드에 저장 (로그인 사용자 전용) */
 export async function pushCloudBackup(): Promise<{ updatedAt: string }> {
   const supabase = getSupabase()
@@ -47,9 +61,41 @@ export async function pushCloudBackup(): Promise<{ updatedAt: string }> {
   return { updatedAt: data.updated_at }
 }
 
+/**
+ * 로컬 데이터가 바뀌면 잠시 후 클라우드에 자동 업로드.
+ * (로그인 상태일 때만)
+ */
+export function queueCloudPush(delayMs = 1200): void {
+  if (suppressCloudPush) return
+  if (!isCloudConfigured()) return
+
+  if (pushTimer) clearTimeout(pushTimer)
+  pushTimer = setTimeout(() => {
+    pushTimer = null
+    void (async () => {
+      try {
+        if (!(await hasSessionUser())) return
+        if (suppressCloudPush) return
+        pushInFlight = pushCloudBackup()
+          .then(() => undefined)
+          .catch((err) => {
+            console.warn('[javis] cloud auto-push failed', err)
+          })
+          .finally(() => {
+            pushInFlight = null
+          })
+        await pushInFlight
+      } catch (err) {
+        console.warn('[javis] cloud auto-push skipped', err)
+      }
+    })()
+  }, delayMs)
+}
+
 /** 클라우드 데이터를 로컬에 적용. 적용 후 페이지 새로고침 권장 */
 export async function pullCloudBackup(): Promise<{
   applied: boolean
+  changed: boolean
   updatedAt: string | null
 }> {
   const supabase = getSupabase()
@@ -70,7 +116,7 @@ export async function pullCloudBackup(): Promise<{
 
   if (error) throw error
   if (!data?.payload) {
-    return { applied: false, updatedAt: null }
+    return { applied: false, changed: false, updatedAt: null }
   }
 
   const payload = data.payload as JavisBackupFile
@@ -78,8 +124,21 @@ export async function pullCloudBackup(): Promise<{
     throw new Error('클라우드 데이터 형식이 올바르지 않습니다.')
   }
 
-  applyBackup(payload)
-  return { applied: true, updatedAt: data.updated_at }
+  const before = JSON.stringify(buildBackup().data)
+  const incoming = JSON.stringify(payload.data)
+  const changed = before !== incoming
+
+  suppressCloudPush = true
+  try {
+    applyBackup(payload)
+  } finally {
+    // 다음 tick까지 push 억제 (save 연쇄 방지)
+    window.setTimeout(() => {
+      suppressCloudPush = false
+    }, 500)
+  }
+
+  return { applied: true, changed, updatedAt: data.updated_at }
 }
 
 export async function fetchCloudMeta(): Promise<{ updatedAt: string | null }> {
@@ -102,11 +161,13 @@ export async function fetchCloudMeta(): Promise<{ updatedAt: string | null }> {
 }
 
 /**
- * 로그인 직후 동기화:
- * - 클라우드에 데이터 있으면 pull
+ * 로그인/세션 복원 시 동기화:
+ * - 클라우드에 데이터 있으면 pull (기기 간 동일 결과)
  * - 없으면 현재 로컬을 push
  */
-export async function syncOnLogin(): Promise<'pulled' | 'pushed' | 'noop'> {
+export async function syncOnLogin(): Promise<
+  'pulled' | 'unchanged' | 'pushed' | 'noop'
+> {
   const supabase = getSupabase()
   if (!supabase) return 'noop'
 
@@ -124,7 +185,19 @@ export async function syncOnLogin(): Promise<'pulled' | 'pushed' | 'noop'> {
   if (error) throw error
 
   if (data?.payload && typeof data.payload === 'object' && 'data' in data.payload) {
-    applyBackup(data.payload as JavisBackupFile)
+    const payload = data.payload as JavisBackupFile
+    const before = JSON.stringify(buildBackup().data)
+    const incoming = JSON.stringify(payload.data)
+    if (before === incoming) return 'unchanged'
+
+    suppressCloudPush = true
+    try {
+      applyBackup(payload)
+    } finally {
+      window.setTimeout(() => {
+        suppressCloudPush = false
+      }, 500)
+    }
     return 'pulled'
   }
 

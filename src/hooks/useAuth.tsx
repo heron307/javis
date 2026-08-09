@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
+  const syncOnceRef = useRef(false)
 
   const runLoginSync = useCallback(async () => {
     setSyncing(true)
@@ -43,6 +45,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const result = await syncOnLogin()
       setLastSyncAt(new Date().toISOString())
+      // 클라우드 내용이 로컬과 다르면 홈으로 이동해 캐시 갱신
       if (result === 'pulled') {
         window.setTimeout(() => {
           window.location.assign(`${window.location.origin}/`)
@@ -55,6 +58,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSyncing(false)
     }
   }, [])
+
+  const ensureCloudSync = useCallback(async () => {
+    if (syncOnceRef.current) return
+    syncOnceRef.current = true
+    await runLoginSync()
+  }, [runLoginSync])
 
   useEffect(() => {
     if (!configured) {
@@ -69,18 +78,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false
 
-    supabase.auth.getSession().then(({ data }) => {
+    supabase.auth.getSession().then(async ({ data }) => {
       if (cancelled) return
       setSession(data.session)
       setLoading(false)
+      // 이미 로그인된 상태로 다른 기기/브라우저에서 열어도 클라우드 기준으로 맞춤
+      if (data.session?.user) {
+        await ensureCloudSync()
+      }
     })
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, next) => {
       setSession(next)
-      if (event === 'SIGNED_IN') {
-        await runLoginSync()
+      if (event === 'SIGNED_IN' && next?.user) {
+        syncOnceRef.current = false
+        await ensureCloudSync()
+      }
+      if (event === 'SIGNED_OUT') {
+        syncOnceRef.current = false
+        setLastSyncAt(null)
       }
     })
 
@@ -88,12 +106,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       cancelled = true
       subscription.unsubscribe()
     }
-  }, [configured, runLoginSync])
+  }, [configured, ensureCloudSync])
 
   const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
     const supabase = getSupabase()
     if (!supabase) throw new Error('클라우드가 설정되지 않았습니다.')
-    const redirectTo = `${window.location.origin}${window.location.pathname}`
+    const redirectTo = `${window.location.origin}/`
     const { error } = await supabase.auth.signInWithOAuth({
       provider,
       options: {
