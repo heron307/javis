@@ -26,6 +26,8 @@ type AuthContextValue = {
   syncing: boolean
   lastSyncAt: string | null
   syncError: string | null
+  /** 수동/포커스 동기화 (로컬↔클라우드 병합) */
+  resync: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -37,16 +39,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [syncing, setSyncing] = useState(false)
   const [lastSyncAt, setLastSyncAt] = useState<string | null>(null)
   const [syncError, setSyncError] = useState<string | null>(null)
-  const syncOnceRef = useRef(false)
+  const initialSyncDoneRef = useRef(false)
+  const syncingRef = useRef(false)
 
-  const runLoginSync = useCallback(async () => {
+  const runLoginSync = useCallback(async (opts?: { forceReload?: boolean }) => {
+    if (syncingRef.current) return
+    syncingRef.current = true
     setSyncing(true)
     setSyncError(null)
     try {
       const result = await syncOnLogin()
       setLastSyncAt(new Date().toISOString())
-      // 클라우드 내용이 로컬과 다르면 홈으로 이동해 캐시 갱신
-      if (result === 'pulled') {
+      initialSyncDoneRef.current = true
+      // 클라우드·로컬 병합으로 로컬이 바뀌면 캐시 갱신 위해 홈으로 이동
+      if (result === 'pulled' || opts?.forceReload) {
         window.setTimeout(() => {
           window.location.assign(`${window.location.origin}/`)
         }, 350)
@@ -54,14 +60,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error(err)
       setSyncError(err instanceof Error ? err.message : '동기화 실패')
+      // 실패 시 다음 포커스/재시도 가능
+      initialSyncDoneRef.current = false
     } finally {
+      syncingRef.current = false
       setSyncing(false)
     }
   }, [])
 
-  const ensureCloudSync = useCallback(async () => {
-    if (syncOnceRef.current) return
-    syncOnceRef.current = true
+  const resync = useCallback(async () => {
     await runLoginSync()
   }, [runLoginSync])
 
@@ -82,9 +89,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (cancelled) return
       setSession(data.session)
       setLoading(false)
-      // 이미 로그인된 상태로 다른 기기/브라우저에서 열어도 클라우드 기준으로 맞춤
-      if (data.session?.user) {
-        await ensureCloudSync()
+      if (data.session?.user && !initialSyncDoneRef.current) {
+        await runLoginSync()
       }
     })
 
@@ -93,20 +99,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } = supabase.auth.onAuthStateChange(async (event, next) => {
       setSession(next)
       if (event === 'SIGNED_IN' && next?.user) {
-        syncOnceRef.current = false
-        await ensureCloudSync()
+        initialSyncDoneRef.current = false
+        await runLoginSync()
       }
       if (event === 'SIGNED_OUT') {
-        syncOnceRef.current = false
+        initialSyncDoneRef.current = false
         setLastSyncAt(null)
       }
     })
 
+    let focusTimer: ReturnType<typeof setTimeout> | null = null
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      if (!initialSyncDoneRef.current) return
+      if (focusTimer) clearTimeout(focusTimer)
+      focusTimer = setTimeout(() => {
+        focusTimer = null
+        void supabase.auth.getSession().then(({ data }) => {
+          if (data.session?.user) void runLoginSync()
+        })
+      }, 400)
+    }
+
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+
     return () => {
       cancelled = true
       subscription.unsubscribe()
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+      if (focusTimer) clearTimeout(focusTimer)
     }
-  }, [configured, ensureCloudSync])
+  }, [configured, runLoginSync])
 
   const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
     const supabase = getSupabase()
@@ -141,6 +166,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signOut()
     if (error) throw error
     setLastSyncAt(null)
+    initialSyncDoneRef.current = false
   }, [])
 
   const value = useMemo<AuthContextValue>(
@@ -156,6 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       syncing,
       lastSyncAt,
       syncError,
+      resync,
     }),
     [
       configured,
@@ -168,6 +195,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       syncing,
       lastSyncAt,
       syncError,
+      resync,
     ],
   )
 

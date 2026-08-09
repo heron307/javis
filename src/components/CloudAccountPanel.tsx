@@ -13,6 +13,7 @@ export function CloudAccountPanel() {
     syncing,
     lastSyncAt,
     syncError,
+    resync,
   } = useAuth()
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -75,7 +76,7 @@ export function CloudAccountPanel() {
 
   async function handlePull() {
     const ok = window.confirm(
-      '클라우드 데이터로 현재 브라우저 데이터를 덮어씁니다. 계속할까요?',
+      '클라우드와 이 브라우저 데이터를 합칩니다(장소 등 id 기준). 계속할까요?',
     )
     if (!ok) return
     setBusy(true)
@@ -93,12 +94,26 @@ export function CloudAccountPanel() {
         )
         return
       }
-      setMessage(`다운로드 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
+      setMessage(`병합 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
       window.setTimeout(() => {
         window.location.assign(`${window.location.origin}/`)
       }, 400)
     } catch (err) {
       setError(err instanceof Error ? err.message : '다운로드 실패')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleResync() {
+    setBusy(true)
+    setError('')
+    setMessage('')
+    try {
+      await resync()
+      setMessage('동기화(병합) 요청 완료')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '동기화 실패')
     } finally {
       setBusy(false)
     }
@@ -112,8 +127,8 @@ export function CloudAccountPanel() {
       {!user ? (
         <>
           <p className="cloud-account-hint">
-            Google 또는 GitHub로 로그인하면 기기·브라우저가 달라도 같은 데이터가
-            자동으로 맞춰집니다.
+            Google 또는 GitHub로 로그인하면 기기·브라우저 데이터를 합쳐(병합)
+            같은 Geo / Travel / Mission 목록을 유지합니다.
           </p>
           <div className="cloud-account-actions">
             <button
@@ -147,6 +162,14 @@ export function CloudAccountPanel() {
             <button
               type="button"
               className="btn-primary"
+              onClick={handleResync}
+              disabled={busy || syncing}
+            >
+              지금 동기화
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
               onClick={handlePush}
               disabled={busy || syncing}
             >
@@ -158,7 +181,7 @@ export function CloudAccountPanel() {
               onClick={handlePull}
               disabled={busy || syncing}
             >
-              클라우드에서 불러오기
+              클라우드와 병합
             </button>
             <button
               type="button"

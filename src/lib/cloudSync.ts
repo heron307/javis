@@ -1,6 +1,8 @@
 import {
   applyBackup,
+  backupDataEqual,
   buildBackup,
+  mergeBackups,
   type JavisBackupFile,
 } from './dataBackup'
 import { getSupabase, isCloudConfigured } from './supabase'
@@ -21,6 +23,8 @@ type UserDataRow = {
 let suppressCloudPush = false
 let pushTimer: ReturnType<typeof setTimeout> | null = null
 let pushInFlight: Promise<void> | null = null
+let syncInFlight: Promise<'pulled' | 'unchanged' | 'pushed' | 'noop'> | null =
+  null
 
 async function hasSessionUser(): Promise<boolean> {
   const supabase = getSupabase()
@@ -29,6 +33,17 @@ async function hasSessionUser(): Promise<boolean> {
     data: { session },
   } = await supabase.auth.getSession()
   return Boolean(session?.user)
+}
+
+function withPushSuppressed<T>(fn: () => T): T {
+  suppressCloudPush = true
+  try {
+    return fn()
+  } finally {
+    window.setTimeout(() => {
+      suppressCloudPush = false
+    }, 800)
+  }
 }
 
 /** 현재 로컬 데이터를 클라우드에 저장 (로그인 사용자 전용) */
@@ -124,18 +139,19 @@ export async function pullCloudBackup(): Promise<{
     throw new Error('클라우드 데이터 형식이 올바르지 않습니다.')
   }
 
-  const before = JSON.stringify(buildBackup().data)
-  const incoming = JSON.stringify(payload.data)
-  const changed = before !== incoming
+  const local = buildBackup()
+  const merged = mergeBackups(local, payload)
+  const changed = !backupDataEqual(local.data, merged.data)
 
-  suppressCloudPush = true
-  try {
-    applyBackup(payload)
-  } finally {
-    // 다음 tick까지 push 억제 (save 연쇄 방지)
-    window.setTimeout(() => {
-      suppressCloudPush = false
-    }, 500)
+  if (changed) {
+    withPushSuppressed(() => {
+      applyBackup(merged)
+    })
+  }
+
+  // 클라우드가 병합본보다 빈약하면 병합 결과를 다시 올림
+  if (!backupDataEqual(payload.data, merged.data)) {
+    await pushCloudBackup()
   }
 
   return { applied: true, changed, updatedAt: data.updated_at }
@@ -161,46 +177,81 @@ export async function fetchCloudMeta(): Promise<{ updatedAt: string | null }> {
 }
 
 /**
- * 로그인/세션 복원 시 동기화:
- * - 클라우드에 데이터 있으면 pull (기기 간 동일 결과)
- * - 없으면 현재 로컬을 push
+ * 로그인/세션 복원·탭 포커스 시 동기화:
+ * - 로컬과 클라우드를 id 기준 합집합(merge)
+ * - 로컬이 바뀌면 apply 후 reload 유도
+ * - 클라우드가 빈약하면 병합본 push
  */
 export async function syncOnLogin(): Promise<
   'pulled' | 'unchanged' | 'pushed' | 'noop'
 > {
-  const supabase = getSupabase()
-  if (!supabase) return 'noop'
+  if (syncInFlight) return syncInFlight
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return 'noop'
+  syncInFlight = (async () => {
+    const supabase = getSupabase()
+    if (!supabase) return 'noop'
 
-  const { data, error } = await supabase
-    .from('javis_user_data')
-    .select('payload, updated_at')
-    .eq('user_id', user.id)
-    .maybeSingle()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return 'noop'
 
-  if (error) throw error
-
-  if (data?.payload && typeof data.payload === 'object' && 'data' in data.payload) {
-    const payload = data.payload as JavisBackupFile
-    const before = JSON.stringify(buildBackup().data)
-    const incoming = JSON.stringify(payload.data)
-    if (before === incoming) return 'unchanged'
-
-    suppressCloudPush = true
-    try {
-      applyBackup(payload)
-    } finally {
-      window.setTimeout(() => {
-        suppressCloudPush = false
-      }, 500)
+    // 진행 중 push가 있으면 끝난 뒤 병합 (덮어쓰기 레이스 방지)
+    if (pushInFlight) {
+      try {
+        await pushInFlight
+      } catch {
+        /* ignore */
+      }
     }
-    return 'pulled'
-  }
 
-  await pushCloudBackup()
-  return 'pushed'
+    const { data, error } = await supabase
+      .from('javis_user_data')
+      .select('payload, updated_at')
+      .eq('user_id', user.id)
+      .maybeSingle()
+
+    if (error) throw error
+
+    const local = buildBackup()
+
+    if (
+      data?.payload &&
+      typeof data.payload === 'object' &&
+      'data' in data.payload
+    ) {
+      const remote = data.payload as JavisBackupFile
+      const merged = mergeBackups(local, remote)
+      const localChanged = !backupDataEqual(local.data, merged.data)
+      const cloudNeedsUpdate = !backupDataEqual(remote.data, merged.data)
+
+      if (localChanged) {
+        withPushSuppressed(() => {
+          applyBackup(merged)
+        })
+      }
+
+      if (cloudNeedsUpdate) {
+        // 병합본을 클라우드에 반영 (다른 브라우저가 다음 sync 때 받음)
+        if (localChanged) {
+          // apply 직후 buildBackup이 병합본을 읽도록
+          await pushCloudBackup()
+        } else {
+          await pushCloudBackup()
+        }
+        return localChanged ? 'pulled' : 'pushed'
+      }
+
+      return localChanged ? 'pulled' : 'unchanged'
+    }
+
+    await pushCloudBackup()
+    return 'pushed'
+  })()
+
+  try {
+    return await syncInFlight
+  } finally {
+    syncInFlight = null
+  }
 }

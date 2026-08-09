@@ -296,6 +296,140 @@ export function applyBackup(backup: JavisBackupFile): ApplyBackupResult {
   return { appliedKeys }
 }
 
+type IdRecord = {
+  id: string
+  updatedAt?: string
+  createdAt?: string
+  visited?: boolean
+}
+
+function recordTime(item: IdRecord): number {
+  for (const key of ['updatedAt', 'createdAt'] as const) {
+    const raw = item[key]
+    if (!raw) continue
+    const t = Date.parse(raw)
+    if (!Number.isNaN(t)) return t
+  }
+  return 0
+}
+
+/** 같은 id는 최신(updatedAt/createdAt) 우선. visited는 OR. */
+function mergeIdArrays(local: unknown, remote: unknown): unknown[] {
+  const a = Array.isArray(local) ? local : []
+  const b = Array.isArray(remote) ? remote : []
+  const map = new Map<string, IdRecord>()
+
+  const ingest = (list: unknown[]) => {
+    for (const raw of list) {
+      if (!raw || typeof raw !== 'object') continue
+      const item = raw as IdRecord
+      if (typeof item.id !== 'string' || !item.id) continue
+      const prev = map.get(item.id)
+      if (!prev) {
+        map.set(item.id, { ...item })
+        continue
+      }
+      const newer = recordTime(item) >= recordTime(prev) ? item : prev
+      const older = newer === item ? prev : item
+      map.set(item.id, {
+        ...older,
+        ...newer,
+        visited: Boolean(prev.visited) || Boolean(item.visited),
+      })
+    }
+  }
+
+  ingest(a)
+  ingest(b)
+  return [...map.values()].sort((x, y) => x.id.localeCompare(y.id))
+}
+
+const MERGE_ARRAY_KEYS: BackupKey[] = [
+  'javis.geo.places.v1',
+  'javis.geo.categories.v1',
+  'javis.travel.visits.v1',
+  'javis.missions.v1',
+  'javis.flight.scans.v1',
+  'javis.stay.scans.v1',
+]
+
+/**
+ * 로컬 + 클라우드를 합칩니다 (덮어쓰기 대신 합집합).
+ * 배열 키는 id 기준 병합, 그 외(listView 등)는 클라우드 우선.
+ */
+export function mergeBackupData(
+  local: JavisBackupFile['data'],
+  remote: JavisBackupFile['data'],
+): JavisBackupFile['data'] {
+  const out: JavisBackupFile['data'] = { ...local }
+
+  for (const key of BACKUP_KEYS) {
+    const hasLocal = key in local
+    const hasRemote = key in remote
+    if (!hasLocal && !hasRemote) continue
+
+    if (MERGE_ARRAY_KEYS.includes(key)) {
+      out[key] = mergeIdArrays(local[key], remote[key])
+      continue
+    }
+
+    // 스칼라/기타: 클라우드 값 우선, 없으면 로컬
+    if (hasRemote) out[key] = remote[key]
+    else out[key] = local[key]
+  }
+
+  return out
+}
+
+export function mergeBackups(
+  local: JavisBackupFile,
+  remote: JavisBackupFile,
+): JavisBackupFile {
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    app: 'J.A.V.I.S.',
+    data: mergeBackupData(local.data, remote.data),
+  }
+}
+
+function canonicalizeData(
+  data: JavisBackupFile['data'],
+): JavisBackupFile['data'] {
+  const out: JavisBackupFile['data'] = {}
+  for (const key of BACKUP_KEYS) {
+    if (!(key in data)) continue
+    const value = data[key]
+    if (Array.isArray(value)) {
+      const sorted = [...value].sort((x, y) => {
+        const xid =
+          x && typeof x === 'object' && 'id' in x
+            ? String((x as IdRecord).id)
+            : ''
+        const yid =
+          y && typeof y === 'object' && 'id' in y
+            ? String((y as IdRecord).id)
+            : ''
+        return xid.localeCompare(yid)
+      })
+      out[key] = sorted
+    } else {
+      out[key] = value
+    }
+  }
+  return out
+}
+
+export function backupDataEqual(
+  a: JavisBackupFile['data'],
+  b: JavisBackupFile['data'],
+): boolean {
+  return (
+    JSON.stringify(canonicalizeData(a)) === JSON.stringify(canonicalizeData(b))
+  )
+}
+
 export async function readBackupFile(file: File): Promise<ParseBackupResult> {
   if (!file.name.toLowerCase().endsWith('.json') && file.type && !file.type.includes('json')) {
     return { ok: false, error: 'JSON 백업 파일만 선택할 수 있습니다.' }
