@@ -39,6 +39,22 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | null>(null)
 
+const OAUTH_CODE_LOCK = 'javis.oauth.exchangedCode'
+
+function humanizeAuthError(message: string): string {
+  const m = message.toLowerCase()
+  if (m.includes('verifier') || m.includes('pkce')) {
+    return `${message} — 같은 브라우저(시크릿 모드 제외)에서 ARCHIVE → Google 로그인을 다시 눌러 보세요.`
+  }
+  if (m.includes('redirect') || m.includes('not allowed') || m.includes('whitelist')) {
+    return `${message} — Supabase Site URL / Redirect URLs에 https://javis-nu.vercel.app 가 있는지 확인하세요.`
+  }
+  if (m.includes('code') && (m.includes('expired') || m.includes('invalid'))) {
+    return `${message} — 로그인 코드가 만료됐을 수 있습니다. ARCHIVE에서 다시 로그인하세요.`
+  }
+  return message
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const configured = isCloudConfigured()
   const [loading, setLoading] = useState(configured)
@@ -98,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (oauthError) {
         if (!cancelled) {
-          setAuthError(oauthError)
+          setAuthError(humanizeAuthError(oauthError))
           setSession(null)
           setLoading(false)
         }
@@ -107,14 +123,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       if (code) {
+        // React StrictMode 등에서 같은 code로 두 번 교환하는 것 방지
+        try {
+          if (sessionStorage.getItem(OAUTH_CODE_LOCK) === code) {
+            clearOAuthParamsFromUrl()
+            const { data: existing } = await supabase!.auth.getSession()
+            if (cancelled) return
+            setSession(existing.session)
+            setLoading(false)
+            if (existing.session?.user && !initialSyncDoneRef.current) {
+              await runLoginSync()
+            }
+            return
+          }
+          sessionStorage.setItem(OAUTH_CODE_LOCK, code)
+        } catch {
+          /* sessionStorage 불가 시 그냥 진행 */
+        }
+
         const { data, error } = await supabase!.auth.exchangeCodeForSession(code)
         clearOAuthParamsFromUrl()
         if (cancelled) return
         if (error) {
           console.error('[javis] OAuth code exchange failed', error)
+          try {
+            sessionStorage.removeItem(OAUTH_CODE_LOCK)
+          } catch {
+            /* ignore */
+          }
           setAuthError(
-            error.message ||
-              '로그인 코드 교환에 실패했습니다. Supabase Redirect URL에 이 사이트 주소가 있는지 확인하세요.',
+            humanizeAuthError(
+              error.message ||
+                '로그인 코드 교환에 실패했습니다. Supabase Redirect URL에 이 사이트 주소가 있는지 확인하세요.',
+            ),
           )
           setSession(null)
           setLoading(false)

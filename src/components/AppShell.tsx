@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import {
@@ -24,9 +24,15 @@ const NAV_ITEMS = [
 
 export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
   const [backupOpen, setBackupOpen] = useState(false)
-  const { configured, loading, user, syncing, authError } = useAuth()
+  const { configured, loading, user, syncing, authError, clearAuthError } =
+    useAuth()
   const accountName = displayAuthName(user)
   const provider = displayAuthProvider(user)
+
+  // 로그인 실패 시 ARCHIVE를 열어 원인 문구를 바로 보여 줌
+  useEffect(() => {
+    if (authError && !user) setBackupOpen(true)
+  }, [authError, user])
 
   return (
     <div className="app-shell">
@@ -66,9 +72,10 @@ export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
                 className={`nav-auth-btn${user ? ' is-in' : ' is-out'}`}
                 onClick={() => setBackupOpen(true)}
                 title={
-                  user
+                  authError ||
+                  (user
                     ? `${provider ?? 'OAuth'} · ${accountName ?? user.email ?? ''}`
-                    : 'ARCHIVE에서 로그인'
+                    : 'ARCHIVE에서 로그인')
                 }
               >
                 {loading ? (
@@ -113,6 +120,21 @@ export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
           </div>
         </div>
       </nav>
+
+      {configured && authError && !user && (
+        <div className="auth-error-banner" role="alert">
+          <div className="container auth-error-banner-inner">
+            <p className="auth-error-banner-text">{authError}</p>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={clearAuthError}
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
 
       {children}
 
