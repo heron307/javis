@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { pullCloudBackup, pushCloudBackup } from '../lib/cloudSync'
-import { useAuth } from '../hooks/useAuth'
+import { displayAuthName, useAuth } from '../hooks/useAuth'
 
 export function CloudAccountPanel() {
   const {
@@ -8,6 +8,7 @@ export function CloudAccountPanel() {
     loading,
     user,
     signInWithGitHub,
+    signInWithGoogle,
     signOut,
     syncing,
     lastSyncAt,
@@ -22,7 +23,7 @@ export function CloudAccountPanel() {
       <div className="cloud-account">
         <p className="section-code">// CLOUD SYNC</p>
         <p className="cloud-account-hint">
-          GitHub 로그인 동기화가 아직 설정되지 않았습니다. 프로젝트 루트의{' '}
+          클라우드 로그인이 아직 설정되지 않았습니다. 프로젝트 루트의{' '}
           <code>.env</code>에 Supabase 키를 넣고,{' '}
           <code>supabase/schema.sql</code>을 실행하세요.
         </p>
@@ -38,10 +39,11 @@ export function CloudAccountPanel() {
     )
   }
 
-  async function handleLogin() {
+  async function handleLogin(provider: 'github' | 'google') {
     setError('')
     try {
-      await signInWithGitHub()
+      if (provider === 'google') await signInWithGoogle()
+      else await signInWithGitHub()
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인 실패')
     }
@@ -86,7 +88,9 @@ export function CloudAccountPanel() {
         return
       }
       setMessage(`다운로드 완료 · ${updatedAt?.slice(0, 19).replace('T', ' ')} · 새로고침…`)
-      window.setTimeout(() => window.location.reload(), 400)
+      window.setTimeout(() => {
+        window.location.assign(`${window.location.origin}/`)
+      }, 400)
     } catch (err) {
       setError(err instanceof Error ? err.message : '다운로드 실패')
     } finally {
@@ -94,24 +98,38 @@ export function CloudAccountPanel() {
     }
   }
 
-  const login = user?.user_metadata?.user_name || user?.email || user?.id
+  const login = displayAuthName(user)
 
   return (
     <div className="cloud-account">
-      <p className="section-code">// CLOUD SYNC · GITHUB</p>
+      <p className="section-code">// CLOUD SYNC · OAUTH</p>
       {!user ? (
         <>
           <p className="cloud-account-hint">
-            GitHub로 로그인하면 어디서든 같은 개인 데이터를 불러올 수 있습니다.
+            Google 또는 GitHub로 로그인하면 어디서든 같은 개인 데이터를 불러올 수
+            있습니다.
           </p>
-          <button type="button" className="btn-primary" onClick={handleLogin}>
-            GitHub로 로그인
-          </button>
+          <div className="cloud-account-actions">
+            <button
+              type="button"
+              className="btn-primary cloud-login-google"
+              onClick={() => handleLogin('google')}
+            >
+              Google로 로그인
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              onClick={() => handleLogin('github')}
+            >
+              GitHub로 로그인
+            </button>
+          </div>
         </>
       ) : (
         <>
           <p className="cloud-account-user font-mono">
-            @{login}
+            {login}
             {syncing ? ' · syncing…' : ''}
           </p>
           {lastSyncAt && (

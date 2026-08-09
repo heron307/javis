@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import type { ReactNode } from 'react'
-import { useAuth } from '../hooks/useAuth'
+import { useAuth, displayAuthName } from '../hooks/useAuth'
 import { BackupRestoreModal } from './BackupRestoreModal'
 
 type Props = {
@@ -21,10 +21,7 @@ const NAV_ITEMS = [
 export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
   const [backupOpen, setBackupOpen] = useState(false)
   const { configured, user } = useAuth()
-  const ghName =
-    (user?.user_metadata?.user_name as string | undefined) ||
-    user?.email?.split('@')[0] ||
-    null
+  const accountName = displayAuthName(user)
 
   return (
     <div className="app-shell">
@@ -58,9 +55,9 @@ export function AppShell({ children, statusLabel = 'ONLINE' }: Props) {
           </ul>
 
           <div className="nav-status">
-            {configured && ghName && (
-              <span className="nav-gh-user font-mono" title="GitHub 로그인됨">
-                @{ghName}
+            {configured && accountName && (
+              <span className="nav-gh-user font-mono" title="로그인됨">
+                {accountName}
               </span>
             )}
             <button

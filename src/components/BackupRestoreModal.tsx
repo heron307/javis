@@ -120,7 +120,8 @@ export function BackupRestoreModal({ open, onClose }: Props) {
       const { appliedKeys } = applyBackup(pending)
       setMessage(`${appliedKeys.length}개 항목 복구 완료. 새로고침 중…`)
       window.setTimeout(() => {
-        window.location.reload()
+        // SPA 경로(/missions 등)에서 reload 시 호스팅 404를 피하기 위해 홈으로 이동
+        window.location.assign(`${window.location.origin}/`)
       }, 400)
     } catch (err) {
       console.error(err)

@@ -7,16 +7,20 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import type { Session, User } from '@supabase/supabase-js'
+import type { Provider, Session, User } from '@supabase/supabase-js'
 import { syncOnLogin } from '../lib/cloudSync'
 import { getSupabase, isCloudConfigured } from '../lib/supabase'
+
+export type OAuthProvider = Extract<Provider, 'github' | 'google'>
 
 type AuthContextValue = {
   configured: boolean
   loading: boolean
   session: Session | null
   user: User | null
+  signInWithOAuth: (provider: OAuthProvider) => Promise<void>
   signInWithGitHub: () => Promise<void>
+  signInWithGoogle: () => Promise<void>
   signOut: () => Promise<void>
   syncing: boolean
   lastSyncAt: string | null
@@ -40,8 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await syncOnLogin()
       setLastSyncAt(new Date().toISOString())
       if (result === 'pulled') {
-        // 모듈 캐시 갱신을 위해 새로고침
-        window.setTimeout(() => window.location.reload(), 350)
+        window.setTimeout(() => {
+          window.location.assign(`${window.location.origin}/`)
+        }, 350)
       }
     } catch (err) {
       console.error(err)
@@ -85,16 +90,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [configured, runLoginSync])
 
-  const signInWithGitHub = useCallback(async () => {
+  const signInWithOAuth = useCallback(async (provider: OAuthProvider) => {
     const supabase = getSupabase()
     if (!supabase) throw new Error('클라우드가 설정되지 않았습니다.')
     const redirectTo = `${window.location.origin}${window.location.pathname}`
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: { redirectTo },
+      provider,
+      options: {
+        redirectTo,
+        queryParams:
+          provider === 'google'
+            ? { access_type: 'offline', prompt: 'consent' }
+            : undefined,
+      },
     })
     if (error) throw error
   }, [])
+
+  const signInWithGitHub = useCallback(
+    () => signInWithOAuth('github'),
+    [signInWithOAuth],
+  )
+
+  const signInWithGoogle = useCallback(
+    () => signInWithOAuth('google'),
+    [signInWithOAuth],
+  )
 
   const signOut = useCallback(async () => {
     const supabase = getSupabase()
@@ -110,7 +131,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       session,
       user: session?.user ?? null,
+      signInWithOAuth,
       signInWithGitHub,
+      signInWithGoogle,
       signOut,
       syncing,
       lastSyncAt,
@@ -120,7 +143,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configured,
       loading,
       session,
+      signInWithOAuth,
       signInWithGitHub,
+      signInWithGoogle,
       signOut,
       syncing,
       lastSyncAt,
@@ -137,4 +162,18 @@ export function useAuth(): AuthContextValue {
     throw new Error('useAuth must be used within AuthProvider')
   }
   return ctx
+}
+
+/** GitHub / Google 공통 표시 이름 */
+export function displayAuthName(user: User | null | undefined): string | null {
+  if (!user) return null
+  const meta = user.user_metadata || {}
+  return (
+    (meta.user_name as string | undefined) ||
+    (meta.preferred_username as string | undefined) ||
+    (meta.full_name as string | undefined) ||
+    (meta.name as string | undefined) ||
+    user.email?.split('@')[0] ||
+    user.id
+  )
 }
